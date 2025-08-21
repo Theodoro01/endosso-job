@@ -2,24 +2,19 @@ const { DynamoDBClient, QueryCommand } = require('@aws-sdk/client-dynamodb');
 const { marshall, unmarshall } = require('@aws-sdk/util-dynamodb');
 const { subHours } = require('date-fns');
 const Logger = require('../utils/Logger');
+const HashService = require('./HashService');
 
 class ProposalService {
   constructor() {
     this.logger = new Logger();
-    this.client = new DynamoDBClient({
-      credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
-      },
-      region: process.env.AWS_REGION || 'us-east-1'
-    });
+    this.hashService = new HashService();
   }
 
   async findProposal(documentNumber, reservationId) {
     try {
       this.logger.info(`Buscando proposta: documentNumber=${documentNumber}, reservationId=${reservationId}`);
 
-      // Primeiro, tentar buscar na V1 (DynamoDB)
+      // Primeiro, tentar buscar na V1 (DynamoDB com credenciais hardcoded)
       let proposal = await this.findOneV1(documentNumber, reservationId);
 
       if (!proposal) {
@@ -43,98 +38,119 @@ class ProposalService {
 
   async findOneV1(documentNumber, reservationId) {
     try {
+      // Criar cliente DynamoDB com credenciais da V1 via variáveis de ambiente
+      const client = new DynamoDBClient({
+        credentials: {
+          accessKeyId: process.env.AWS_ACCESS_KEY_ID_V1,
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY_V1,
+        },
+        region: process.env.AWS_REGION_V1,
+      });
+
       const params = {
-        TableName: 'FgtsProposals',
-        IndexName: 'documentNumberCreatedAtIndex',
+        TableName: process.env.DYNAMODB_TABLE_V1,
+        IndexName: process.env.DYNAMODB_INDEX_V1,
         KeyConditionExpression: 'documentNumber = :documentNumber',
         ExpressionAttributeValues: marshall({
           ':documentNumber': documentNumber
         })
       };
 
-      this.logger.info('Buscando na V1:', { documentNumber, reservationId });
+      this.logger.info('documentNumber and reservationId: ', {
+        documentNumber,
+        reservationId
+      });
 
       const command = new QueryCommand(params);
-      const result = await this.client.send(command);
+      const result = await client.send(command);
 
       const proposals = result.Items?.map((item) => unmarshall(item)) ?? [];
 
-      this.logger.info('Propostas encontradas na V1:', proposals.length);
+      this.logger.info('proposals v1: ', proposals);
 
-      const proposalMatch = proposals.find((proposal) => 
-        proposal.contractURL?.includes(reservationId)
-      );
+      const proposalMatch = proposals.find((proposal) => proposal.contractURL?.includes(reservationId));
 
       if (!proposalMatch) {
-        this.logger.info('Nenhuma proposta encontrada com reservationId');
-        return null;
+        this.logger.info('Nenhuma proposta encontrada com reservationId.');
+        return undefined;
       }
 
-      this.logger.info('Proposta encontrada na V1:', proposalMatch);
+      this.logger.info('proposalsMatch: ', proposalMatch);
 
-      // Converter createdAt para Date se for string
-      if (typeof proposalMatch.createdAt === 'string') {
-        proposalMatch.createdAt = new Date(proposalMatch.createdAt);
-      }
+      proposalMatch.createdAt = new Date(proposalMatch.createdAt);
 
       return proposalMatch;
 
     } catch (error) {
-      this.logger.error('Erro ao buscar na V1:', error);
-      return null;
+      this.logger.error('Erro ao buscar proposta V1:', error);
+      return undefined;
     }
   }
 
   async findByDocumentAndReservation(documentNumber, reservationId) {
     try {
-      this.logger.info(`Buscando na V2: documentNumber=${documentNumber}, reservationId=${reservationId}`);
+      // Para V2, usar credenciais AWS diferentes da V1
+      const client = new DynamoDBClient({
+        credentials: {
+          accessKeyId: process.env.AWS_ACCESS_KEY_ID_V2,
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY_V2,
+        },
+        region: process.env.AWS_REGION_V2,
+      });
 
-      // Buscar na V2 - usando uma query diferente no DynamoDB
       const params = {
-        TableName: 'FgtsProposalsV2', // Tabela V2
-        IndexName: 'documentNumberReservationIdIndex', // Índice específico da V2
-        KeyConditionExpression: 'documentNumber = :documentNumber AND reservationId = :reservationId',
+        TableName: process.env.DYNAMODB_TABLE_V2,
+        IndexName: process.env.DYNAMODB_INDEX_V2,
+        KeyConditionExpression: 'documentNumber = :documentNumber',
         ExpressionAttributeValues: marshall({
           ':documentNumber': documentNumber,
-          ':reservationId': reservationId
         })
       };
 
+      this.logger.info('Buscando na V2:', {
+        documentNumber,
+        reservationId,
+        tableName: process.env.DYNAMODB_TABLE_V2,
+      });
+
       const command = new QueryCommand(params);
-      const result = await this.client.send(command);
+      const result = await client.send(command);
 
       const proposals = result.Items?.map((item) => unmarshall(item)) ?? [];
 
-      this.logger.info(`Propostas encontradas na V2: ${proposals.length}`);
+      this.logger.info('proposals v2: ', proposals);
 
       if (proposals.length === 0) {
         this.logger.info('Nenhuma proposta encontrada na V2');
-        return null;
+        return undefined;
       }
 
       const proposal = proposals[0]; // Pegar a primeira proposta encontrada
+      
+      this.logger.info('proposal v2 encontrada: ', proposal);
 
-      this.logger.info('Proposta encontrada na V2:', proposal);
+      const proposalMatch = proposals.find((proposal) => proposal.contractURL?.includes(reservationId))
 
-      // Converter createdAt para Date se for string
-      if (typeof proposal.createdAt === 'string') {
-        proposal.createdAt = new Date(proposal.createdAt);
+      if (!proposalMatch) {
+        console.log('Nenhuma proposta encontrada com reservationId V2.')
+        return undefined
       }
 
-      return proposal;
+      console.log('proposalMatch V2: ', proposalMatch)
 
+      proposalMatch.createdAt = new Date(proposalMatch.createdAt)
+
+      return proposalMatch;
+      
     } catch (error) {
-      this.logger.error('Erro ao buscar na V2:', error);
-      throw error;
+      this.logger.error('Erro ao buscar proposta V2:', error);
+      return undefined;
     }
   }
-
-
 
   generatePayload(proposal) {
     const currentDate = new Date();
     const subDate = subHours(currentDate, 3);
-    
     const formattedHour = `${subDate.getUTCDate().toString().padStart(2, '0')}/${(subDate.getUTCMonth() + 1)
       .toString()
       .padStart(2, '0')}/${subDate.getUTCFullYear().toString().padStart(4, '0')} ${subDate
@@ -151,22 +167,19 @@ class ProposalService {
       'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'
     ];
 
-    return {
+    const payload = {
       numeroccb: proposal.id,
       local: proposal.customer.city,
       dia: proposal.createdAt.getDate(),
       mes: meses[proposal.createdAt.getMonth()],
       ano: proposal.createdAt.getFullYear(),
-      cartosHash: this.generateHash('cartosHash' + formattedHour),
+      cartosHash: this.hashService.generate('cartosHash' + formattedHour),
       horaGeracao: formattedHour,
-      randomHash: this.generateHash('randomHash' + formattedHour)
+      randomHash: this.hashService.generate('randomHash' + formattedHour)
     };
-  }
 
-  generateHash(input) {
-    const HashService = require('./HashService');
-    const hashService = new HashService();
-    return hashService.generate(input);
+    this.logger.info('Payload gerado:', payload);
+    return payload;
   }
 }
 
