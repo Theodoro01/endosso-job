@@ -1,0 +1,22 @@
+# Configurações das pastas
+INPUT_FOLDER=/Users/theodorovieira/Desktop/input-documents
+OUTPUT_FOLDER=/Users/theodorovieira/Desktop/processed-documents
+TEMPLATES_FOLDER=/Users/theodorovieira/Desktop/templates
+
+# Configurações de log
+LOG_LEVEL=info
+
+# Configurações do Puppeteer (para conversão PDF)
+PUPPETEER_SKIP_DOWNLOAD=true
+
+# Configurações AWS (DynamoDB)
+AWS_ACCESS_KEY_ID=sua_access_key_aqui
+AWS_SECRET_ACCESS_KEY=sua_secret_key_aqui
+AWS_REGION=us-east-1
+
+
+# Configurações de Performance (MÁXIMA CAPACIDADE)
+MAX_CONCURRENT=8
+MAX_QUEUE_SIZE=500
+PROCESS_TIMEOUT=180000
+MAX_MEMORY_USAGE=4096
