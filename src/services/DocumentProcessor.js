@@ -6,6 +6,12 @@ const DocumentService = require('./DocumentService');
 const HashService = require('./HashService');
 const ProposalService = require('./ProposalService');
 
+// Verificar se o garbage collector está disponível
+const gc = global.gc;
+if (!gc) {
+  console.warn('⚠️  Garbage collector não está disponível. Execute com --expose-gc');
+}
+
 class DocumentProcessor {
   constructor() {
     this.logger = new Logger();
@@ -84,6 +90,16 @@ class DocumentProcessor {
       await fs.writeFile(outputPath, finalPdf.file);
       
       this.logger.info(`Documento processado com sucesso: ${outputFileName}`);
+
+      // Forçar garbage collection após operações de memória intensiva
+      if (gc) {
+        try {
+          gc();
+          this.logger.debug(`🧹 Garbage collection executado após processamento de: ${outputFileName}`);
+        } catch (error) {
+          this.logger.warn(`Erro ao executar garbage collection: ${error.message}`);
+        }
+      }
 
       return {
         success: true,

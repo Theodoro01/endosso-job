@@ -3,6 +3,12 @@ const Logger = require('../utils/Logger');
 const DocumentProcessor = require('./DocumentProcessor');
 const config = require('../config/config');
 
+// Verificar se o garbage collector está disponível
+const gc = global.gc;
+if (!gc) {
+  console.warn('⚠️  Garbage collector não está disponível. Execute com --expose-gc');
+}
+
 class QueueProcessor extends EventEmitter {
   constructor() {
     super();
@@ -115,6 +121,16 @@ class QueueProcessor extends EventEmitter {
     } finally {
       this.processing.delete(filePath);
       this.stats.processing = this.processing.size;
+      
+      // Forçar garbage collection após processamento de cada arquivo
+      if (gc) {
+        try {
+          gc();
+          this.logger.debug(`🧹 Garbage collection executado para: ${fileName}`);
+        } catch (error) {
+          this.logger.warn(`Erro ao executar garbage collection: ${error.message}`);
+        }
+      }
     }
   }
 
